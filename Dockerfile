@@ -6,7 +6,7 @@ RUN composer install --no-interaction --ignore-platform-reqs
 FROM php:8.2-alpine
 WORKDIR /app
 COPY --from=builder /build .
-RUN apk add --update-cache autoconf build-base rabbitmq-c-dev \
+RUN apk add --update supervisor autoconf build-base rabbitmq-c-dev \
     && pecl install amqp \
     && docker-php-ext-enable amqp
-ENTRYPOINT ["php", "index.php"]
+ENTRYPOINT ["supervisord", "--configuration", "messenger-worker.conf"]

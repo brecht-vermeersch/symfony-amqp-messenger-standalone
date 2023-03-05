@@ -2,8 +2,13 @@
 
 require __DIR__ . '/vendor/autoload.php';
 
+use App\HelloWorldHandler;
+use App\HelloWorldMessage;
+use App\Logger;
+use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
 use Symfony\Component\Messenger\Envelope;
+use Symfony\Component\Messenger\EventListener\StopWorkerOnMessageLimitListener;
 use Symfony\Component\Messenger\Handler\HandlersLocator;
 use Symfony\Component\Messenger\MessageBus;
 use Symfony\Component\Messenger\Middleware\HandleMessageMiddleware;
@@ -11,34 +16,19 @@ use Symfony\Component\Messenger\Transport\Serialization\Serializer;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpTransportFactory;
 use Symfony\Component\Messenger\Worker;
 
-class HelloWorldMessage
-{
-    public string $content = "Hello world!";
-}
-
-class HelloWorldHandler
-{
-    public function __invoke(HelloWorldMessage $message): void
-    {
-        echo $message->content;
-    }
-}
-
-$dns = 'amqp://guest:guest@host.docker.internal:5672/%2f/messages';
-$options = [
-    'exchange' => [
-        'name' => 'foo',
-        'type' => \AMQP_EX_TYPE_FANOUT
+$transport = (new AmqpTransportFactory)->createTransport(
+    'amqp://guest:guest@host.docker.internal:5672/%2f/messages',
+    [
+        'exchange' => [
+            'name' => 'foo',
+            'type' => \AMQP_EX_TYPE_FANOUT
+        ],
+        'queues' => [
+            'bar' => [],
+        ]
     ],
-    'queues' => [
-        'bar' => [],
-    ]
-];
-$transport = (new AmqpTransportFactory)->createTransport($dns, $options, new Serializer());
-
-$transport->send(new Envelope(new HelloWorldMessage(), [
-    new AmqpStamp('messages')
-]));
+    new Serializer()
+);
 
 $bus = new MessageBus([
     new HandleMessageMiddleware(new HandlersLocator([
@@ -46,5 +36,13 @@ $bus = new MessageBus([
     ])),
 ]);
 
-$worker = new Worker([$transport], $bus);
-$worker->run();
+$logger = new Logger();
+
+$eventDispatcher = new EventDispatcher();
+$eventDispatcher->addSubscriber(new StopWorkerOnMessageLimitListener(5, $logger));
+
+for ($i = 0; $i < 5; $i++) {
+    $transport->send(new Envelope(new HelloWorldMessage(), [new AmqpStamp('messages')]));
+}
+
+(new Worker([$transport], $bus, $eventDispatcher, $logger))->run();
